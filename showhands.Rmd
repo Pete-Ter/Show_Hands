@@ -1,0 +1,152 @@
+Show of Hands-- Kaggle
+========================================================
+
+Show of Hands---Kaggle competition for Analytics Edge
+
+```{r}
+setwd("~/Kaggle/Show_Hands")
+
+train<-read.csv("train.csv", header=T,row.names = NULL)
+test<-read.csv("test.csv", header=T, row.names = NULL)
+library(car)
+library(mice)
+library(caret)
+library(gbm)
+train$Happy<-ifelse(train$Happy==1,"YES","NO")
+train$Happy<-as.factor(train$Happy)
+str(train)
+#add factor skipped
+names(subset(train,select=-c(Happy))[,3:108])
+for (i in names(subset(train,select=-c(Happy))[,3:108])) {
+    levels(train[,i]) <- c(levels(train[,i]), "Skipped")
+    train[,i][train[,i] == ''] <- 'Skipped'
+    #train[,i] = factor(train[,i])
+}
+names(train[,1:109])
+#names(test)
+for (i in names(test[,3:108])) {
+    levels(test[,i]) <- c(levels(test[,i]), "Skipped")
+    test[,i][test[,i] == ''] <- 'Skipped'
+    #train[,i] = factor(train[,i])
+}
+names(test[,3:108])
+#for (i in names(train[,3:110])) {
+    #levels(train[,i]) <- c(levels(train[,i]), "Skipped")
+ #   train[,i][train[,i] == ''] <- NA
+    #train[,i] = factor(train[,i])
+#}
+#names(train[,3:110])
+#names(test)
+#for (i in names(test[,3:109])) {
+    #levels(test[,i]) <- c(levels(test[,i]), "Skipped")
+#    test[,i][test[,i] == ''] <- NA
+    #train[,i] = factor(train[,i])
+}
+
+str(train)
+#table(is.na(show))
+
+attach(train)
+table(train$Income)
+#train<-complete(mice(train)) 
+#test<-complete(mice(test))
+train$YOB = NULL
+test$YOB = NULL
+mod1<-glm(factor(Happy)~.,data=train,family="binomial",na.action=na.pass)
+testpred<-predict(mod1,newdata=test,type="response")
+head(testpred)
+
+
+```
+
+GBM
+
+```{r}
+library(pROC)
+TrainInd <- train[!colnames(train) %in% c("UserID","YOB")]
+TestInd <- test[!colnames(test) %in% c("UserID","YOB")]
+
+ctrl <- trainControl(method="cv",classProbs = TRUE, summaryFunction = twoClassSummary)
+#set.seed(1)
+grid<-expand.grid(.interaction.depth=seq(1,15, by=2),.n.trees=seq(100,2000,by=50),.shrinkage=c(0.01,.2))
+gbmTune <- train(factor(train$Happy)~.,data = TrainInd,method = "gbm",metric = "ROC",  verbose = FALSE,trControl = ctrl,tuneGrid=grid,preProc = c("center", "scale"))
+
+gbmTune
+gbmTune$finalModel
+testpred<-predict(gbmTune,type="prob",newdata=TestInd)
+head(testpred)
+table(testpred)
+range(testpred)
+names(TrainInd)
+```
+
+
+Random Forest
+
+```{r Random Forest}
+TrainInd <- train[!colnames(train) %in% c("UserID","Happy")]
+TrainInd <- train[!colnames(train) %in% c("UserID","Happy")]
+
+TrainInd <- train1[colnames(train) %in% c("Gender","Income","HouseholdStatus","EducationLevel")]
+
+ctrl <- trainControl(method="repeatedcv",repeats=3,classProbs = TRUE, summaryFunction = twoClassSummary)
+#set.seed(1)
+#grid<-expand.grid(.interaction.depth=seq(1,7, by=2),.n.trees=seq(100,1000,by=50),.shrinkage=c(0.01,.1))
+rfTune <- train(x=TrainInd, y=factor(train$Happy),data = train,method = "rf",metric = "ROC",verbose = FALSE,trControl = ctrl,tunelength=5)
+str(rfTune)
+rfTune$finalModel
+testpred<-predict(rfTune,newdata=subset(test,select=-c(UserID,YOB)),type="prob")
+head(testpred)
+varImpPlot(rfTune$finalModel)
+```
+GLMNET
+
+```{r}
+TrainInd <- train[!colnames(train) %in% c("UserID","YOB")]
+TestInd <- test[!colnames(test) %in% c("UserID","YOB")]
+ctrl <- trainControl(method="repeatedcv",repeats=3,classProbs = TRUE, summaryFunction = twoClassSummary)
+#set.seed(1)
+#grid<-expand.grid(.interaction.depth=seq(1,7, by=2),.n.trees=seq(100,1000,by=50),.shrinkage=c(0.01,.1))
+glmnetTune <- train(x=TrainInd, y=factor(train$Happy),data = train,method = "glmnet",metric = "ROC",verbose = FALSE,trControl = ctrl,tuneGrid = expand.grid(.alpha=c(0,1),.lambda=seq(0,.25,by=0.005)))
+
+```
+
+
+SVM
+```{r svm}
+
+TrainInd <- train[!colnames(train) %in% c("UserID")]
+TestInd <- test[!colnames(test) %in% c("UserID")]
+bootControl <- trainControl(method="cv",classProbs=TRUE,summaryFunction = twoClassSummary)
+set.seed(2)
+
+svmFit <- train(factor(Happy)~., data=TrainInd, method = "svmRadial", tuneLength = 5, trControl = bootControl, scaled = FALSE,metric="ROC",preProc = c("center", "scale"))
+
+svmFit
+svmFit$finalModel
+
+testpred<-predict(svmFit,newdata=TestInd,type="prob")
+
+head(testpred)
+table(testpred)
+
+
+```
+
+
+```{r }
+submission = data.frame(UserID = test$UserID, Probability1 = testpred$YES)
+submission = data.frame(UserID = test$UserID, Probability1 = testpred)
+
+#submission$Probability1<-ifelse(submission$Probability1<0,0,submission$Probability1)
+#submission$Probability1<-ifelse(submission$Probability1>1,1,submission$Probability1)
+range(submission$Probability1)
+head(submission)
+#submission$Probability1[is.na(submission$Probability1)]<-.5
+write.csv(submission, "submission.csv",row.names=FALSE) 
+ ```
+
+
+
+
+
